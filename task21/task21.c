@@ -5,10 +5,19 @@
  *      Author: Maxim Kouprianov
  */
 
-#include <linux/kernel.h>
+#include <linux/version.h>
 #include <linux/module.h>
-#include <linux/init.h>
 #include <linux/moduleparam.h>
+#include <linux/init.h>
+
+#include <linux/kernel.h>
+#include <linux/slab.h>
+#include <linux/fs.h>
+#include <linux/errno.h>
+#include <linux/err.h>
+#include <linux/cdev.h>
+#include <linux/device.h>
+#include <linux/mutex.h>
 
 static int num = 1; // number of devices
 
@@ -21,7 +30,8 @@ static void __exit task21_exit(void) {
 	printk(KERN_DEBUG "Xlab's task21 exit\n");
 }
 
-module_param(num, int, 0);
+
+module_param(num, int, S_IRUGO);
 MODULE_PARM_DESC(num, "number of devices to create");
 
 module_init(task21_init);
