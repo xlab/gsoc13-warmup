@@ -10,7 +10,7 @@
 
 /* helpers */
 static void
-cleanup_registered_devices(unsigned int num);
+destroy_created_devices(unsigned int num, struct class *dev_class);
 static int
 poums_init_device(struct poums_device *dev);
 

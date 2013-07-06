@@ -32,21 +32,38 @@ static struct poums_device *poums_devices = NULL; /* array to store devices */
 static int __init
 task21_init(void) {
     pr_info("Xlab's device init\n");
-    int err;
+    int err = 0;
 
-    if(num)
+    //if(num)
 
+    /* allocate region */
     err = alloc_chrdev_region(&first/*where to put*/, 0/*baseminor*/, num/*count*/, BASENAME/*name*/);
     if(err < 0) {
         pr_err("unable to allocate %d chrdev regions: %d", num, err);
         return err;
     }
 
+    /* create class */
     poums_class = class_create(THIS_MODULE/*owner*/, BASENAME/*name*/);
     if(IS_ERR(poums_class)) {
         pr_err("unable to create sysfs class\n");
         err = PTR_ERR(poums_class);
         goto out_class;
+    }
+
+    /* init and register cdevs */
+    poums_devices = (struct poums_device *)kcalloc(num,
+        sizeof(struct poums_device), GFP_KERNEL);
+
+    if(!poums_devices) {
+        pr_err("unable to allocate %d devices: out of free memory\n", num);
+        err = -ENOMEM;
+        goto out_devcreate;
+    }
+
+    int init_num;
+    for(init_num = 0; init_num < num; ++init_num) {
+
     }
 
     unsigned int created_num;
@@ -72,7 +89,10 @@ task21_init(void) {
 	return 0;
 
     out_devcreate:
-        cleanup_created_devices(created_num);
+        destroy_created_devices(created_num, poums_class);
+
+    out_devinit:
+        cleanup_initialized_devices(init_num);
         
     out_class:
         class_destroy(poums_class);
@@ -86,19 +106,49 @@ task21_init(void) {
 static void __exit
 task21_exit(void) {
 	pr_info("Xlab's device exit\n");
-    cleanup_created_devices(num);
+    destroy_created_devices(num, poums_class);
     class_destroy(poums_class);
     unregister_chrdev_region(first, num);
 }
 
 static void
-cleanup_created_devices(unsigned int num) {
+destroy_created_devices(unsigned int num, struct class *dev_class) {
     dev_t curr;
 
     for(; num--;) {
         pr_debug("cleanup_created_devices, wiping %d\n", num);
         curr = MKDEV(MAJOR(first), num);
-        device_destroy(poums_class, curr);
+        device_destroy(dev_class, curr);
+    }
+}
+
+static void deinit_poums_devices(unsigned int num) {
+    struct poums_device *dev;
+
+    if(poums_devices) {
+        for(; num--;) {
+            dev = poums_devices[num];
+            cdev_del(&dev->cdev); /* deinit cdev */
+            kfree(dev->data); /* cleanup allocated storage */
+        }
+    } else {
+        pr_debug("Nothing to deinit. Wat?\n");
+    }    
+}
+
+static int
+poums_init_device(struct poums_device *dev, unsigned int minor) {
+    BUG_ON(dev == NULL)
+    int err = 0;
+
+    dev->data = NULL;
+    dev->size = 0;
+    cdev_init(&dev->cdev, &poums_fops);
+    dev->cdev.owner = THIS_MODULE;
+
+    err = cdev_add(&dev->cdev, MKDEV(MAJOR(first), minor), 1/*count*/);
+    if(err < 0) {
+        pr_ // XXX: TODO
     }
 }
 
