@@ -29,17 +29,53 @@ static dev_t first; /* first device number for driver */
 static struct class *poums_class = NULL;/* ptr to device's class object */
 static struct poums_device *poums_devices = NULL; /* array to store devices */
 
+/* =============================================== */
+
+static int
+poums_open(struct inode *inode, struct file *fp) {
+    struct poums_device *dev= NULL;
+
+    unsigned int minor = iminor(inode);
+    dev = &poums_devices[minor];
+    fp->private_data = dev;
+
+    pr_info("opening /dev/poums%d\n", minor);
+    return 0;
+}
+static int
+poums_close(struct inode *inode, struct file *fp) {
+    unsigned int minor = iminor(inode);
+    pr_info("closing /dev/poums%d\n", minor);
+    return 0;
+}
+static ssize_t
+poums_read(struct file *fp, char __user *buff, size_t count, loff_t *off) {
+    unsigned int minor = MINOR(fp->cdev->dev);
+    pr_info("opening /dev/poums%d\n", minor);
+    return 0;
+}
+static ssize_t
+poums_write(struct file *fp, const char __user *buff, size_t count, loff_t *) {
+    unsigned int minor = MINOR(fp->cdev->dev);
+    pr_info("opening /dev/poums%d\n", minor);
+    return 0;
+}
+
+/* =============================================== */
+
 static int __init
 task21_init(void) {
     pr_info("Xlab's device init\n");
     int err = 0;
 
-    //if(num)
+    // XXX: TODO
+    /* check user parameters
+    if(num)
 
-    /* allocate region */
+    /* allocate region for @num devices */
     err = alloc_chrdev_region(&first/*where to put*/, 0/*baseminor*/, num/*count*/, BASENAME/*name*/);
     if(err < 0) {
-        pr_err("unable to allocate %d chrdev regions: %d", num, err);
+        pr_err("unable to allocate %d chrdev regions: %d\n", num, err);
         return err;
     }
 
@@ -51,7 +87,7 @@ task21_init(void) {
         goto out_class;
     }
 
-    /* init and register cdevs */
+    /* init and register @num cdevs (expose to kernel) */
     poums_devices = (struct poums_device *)kcalloc(num,
         sizeof(struct poums_device), GFP_KERNEL);
 
@@ -62,18 +98,25 @@ task21_init(void) {
     }
 
     int init_num;
-    for(init_num = 0; init_num < num; ++init_num) {
 
+    for(init_num = 0; init_num < num; ++init_num) {
+        err = poums_init_device(poums_devices[init_num], init_num);
+        if(err < 0) {
+            pr_err("unable to allocate %d devices, failed at %d\n", num, init_num);
+            goto out_devinit;
+        }
     }
+
+    BUG_ON(init_num != num - 1);/* should be all */
 
     unsigned int created_num;
     dev_t curr;
 
-    /* create @num devices */
-    for(created_num = 1; created_num <= num; ++created_num) {
-        curr = MKDEV(MAJOR(first), created_num - 1);
+    /* create @num devices in sysfs (expose to user) */
+    for(created_num = 0; created_num < num; ++created_num) {
+        curr = MKDEV(MAJOR(first), created_num);
         struct device *dev = device_create(poums_class/*class*/, NULL/*parent*/,
-            curr/*devt*/, NULL/*data*/, "poums%d", created_num - 1)
+            curr/*devt*/, NULL/*data*/, "poums%d", created_num)
         
         if(IS_ERR(dev)) {
             /* fail at create */
@@ -83,7 +126,7 @@ task21_init(void) {
         }
     }
 
-    BUG_ON(created_num != num);
+    BUG_ON(created_num != num - 1); /* should be all */
 
     pr_info("Xlab's device registered successfully\n");
 	return 0;
@@ -92,7 +135,7 @@ task21_init(void) {
         destroy_created_devices(created_num, poums_class);
 
     out_devinit:
-        cleanup_initialized_devices(init_num);
+        deinit_poums_devices(init_num);
         
     out_class:
         class_destroy(poums_class);
@@ -106,7 +149,8 @@ task21_init(void) {
 static void __exit
 task21_exit(void) {
 	pr_info("Xlab's device exit\n");
-    destroy_created_devices(num, poums_class);
+    destroy_created_devices(num, poums_class); /* unexpose from user */
+    deinit_poums_devices(num); /* unexpose from kernel & free mem */
     class_destroy(poums_class);
     unregister_chrdev_region(first, num);
 }
@@ -122,7 +166,8 @@ destroy_created_devices(unsigned int num, struct class *dev_class) {
     }
 }
 
-static void deinit_poums_devices(unsigned int num) {
+static void
+deinit_poums_devices(unsigned int num) {
     struct poums_device *dev;
 
     if(poums_devices) {
@@ -137,7 +182,7 @@ static void deinit_poums_devices(unsigned int num) {
 }
 
 static int
-poums_init_device(struct poums_device *dev, unsigned int minor) {
+init_poums_device(struct poums_device *dev, unsigned int minor) {
     BUG_ON(dev == NULL)
     int err = 0;
 
@@ -148,8 +193,11 @@ poums_init_device(struct poums_device *dev, unsigned int minor) {
 
     err = cdev_add(&dev->cdev, MKDEV(MAJOR(first), minor), 1/*count*/);
     if(err < 0) {
-        pr_ // XXX: TODO
+        pr_warn("failed to add cdev #%d\n", minor);
+        return err;
     }
+
+    return 0;
 }
 
 module_init(task21_init);
