@@ -4,13 +4,35 @@
  *      Author: Maxim Kouprianov
  */
 
+#include <linux/version.h>
+#include <linux/module.h>
+#include <linux/moduleparam.h>
+#include <linux/init.h>
+
+#include <linux/kernel.h>
+#include <linux/slab.h>
+#include <linux/fs.h>
+#include <linux/errno.h>
+#include <linux/err.h>
+#include <linux/cdev.h>
+#include <linux/device.h>
+#include <linux/mutex.h>
+
 #define NUM_MAX 8 /* maximum number of devices */
 #define BUFFSIZE 4096 /* default buffer size to store char-data */
 #define BASENAME "poums" /* defines is a good thing xD */
 
+/* device representation */
+struct poums_device {
+	char *data; /* char buf */
+	unsigned long size; /* amount of data stored in buf */
+	struct cdev cdev;
+	dev_t devt; /* numbers for debug purposes */
+};
+
 /* helpers */
 static int
-init_poums_device(struct poums_device *dev);
+init_poums_device(struct poums_device *dev, unsigned int minor);
 static void
 deinit_poums_devices(unsigned int num);
 static void
@@ -29,21 +51,7 @@ poums_write(struct file *, const char __user *, size_t, loff_t *);
 static loff_t
 poums_llseek(struct file *, loff_t, int);
 
-struct file_operations poums_fops = {
-    .owner = THIS_MODULE,
-    .open = poums_open,
-    .release = poums_close,
-    .read = poums_read,
-    .write = poums_write,
-    .llseek = no_llseek
-};
-/* =============================================== */
-
-/* device representation */
-struct poums_device {
-    char *data; /* char buf */
-    unsigned long size; /* amount of data stored in buf */
-    struct cdev cdev;
-    dev_t devt; /* numbers for debug purposes */
-};
+struct file_operations poums_fops = { .owner = THIS_MODULE, .open = poums_open,
+		.release = poums_close, .read = poums_read, .write = poums_write,
+		.llseek = no_llseek };
 
