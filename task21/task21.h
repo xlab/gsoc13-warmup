@@ -21,6 +21,7 @@
 #define NUM_MAX 8 /* maximum number of devices */
 #define BUFFSIZE 4096 /* default buffer size to store char-data */
 #define BASENAME "poums" /* defines is a good thing xD */
+#define LOG "task21: "
 
 /* device representation */
 struct poums_device {
