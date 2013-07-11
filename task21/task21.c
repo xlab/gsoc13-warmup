@@ -84,7 +84,7 @@ static int __init task21_init(void) {
 		goto out_devcreate;
 	}
 
-	int init_num;
+	unsigned int init_num;
 
 	for (init_num = 0; init_num < num; ++init_num) {
 		err = init_poums_device(&poums_devices[init_num], init_num);
