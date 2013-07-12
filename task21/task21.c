@@ -22,6 +22,7 @@ static struct poums_device *poums_devices = NULL; /* array to store devices */
 static int
 poums_open(struct inode *inode, struct file *fp) {
 	struct poums_device *dev = NULL;
+	int ret = 0;
 
 	unsigned int minor = iminor(inode);
 	unsigned int major = imajor(inode);
@@ -34,14 +35,20 @@ poums_open(struct inode *inode, struct file *fp) {
 	dev = &poums_devices[minor];
 	fp->private_data = dev;
 
-	if(inode->i_cdev != dev->cdev) {
+	if(inode->i_cdev != &dev->cdev) {
 		pr_err(LOG "wrong device found, internal error\n");
 		return -ENODEV;
+	}
+
+	/* lock thread */
+	if(mutex_lock_interruptible(&dev->mutex)) {
+		return -EINTR;
 	}
 
 	/* truncate if opened in write-only mode */
 	if((fp->f_flags & O_ACCMODE) == O_WRONLY) {
 		kfree(dev->data);
+		dev->data = NULL;
 		dev->size = 0;
 	}
 
@@ -52,34 +59,99 @@ poums_open(struct inode *inode, struct file *fp) {
 			pr_err(
 					LOG "unable to allocate %d bytes for the storage (minor=%d)\n",
 					BUFFSIZE, minor);
-			return -ENOMEM;
+			ret = -ENOMEM;
 		} else {
 			dev->size = 0;
 		}
 	}
 
-	pr_info(LOG "opening /dev/poums%d\n", minor);
-	return 0;
+	mutex_unlock(&dev->mutex);
+	pr_info(LOG "opening /dev/poums%d: %d\n", minor, ret);
+	return ret;
 }
+
 static int
 poums_close(struct inode *inode, struct file *fp) {
 	unsigned int minor = iminor(inode);
-	pr_info(LOG "closing /dev/poums%d\n", minor);
+	pr_info(LOG "closing /dev/poums%d: 0\n", minor);
 	return 0;
 }
-static ssize_t
-poums_read(struct file *fp, char __user *buff, size_t count, loff_t *off) {
-	unsigned int minor = iminor(fp->f_inode);
 
-	pr_info(LOG "reading /dev/poums%d\n", minor);
-	return 0;
+static ssize_t
+poums_read(struct file *fp, char __user *buff, size_t count, loff_t *pos) {
+	unsigned int minor = iminor(fp->f_inode);
+	struct poums_device *dev = fp->private_data;
+	ssize_t ret = 0;
+
+	/* lock thread */
+	if(mutex_lock_interruptible(&dev->mutex)) {
+		return -EINTR;
+	}
+
+	/* boundary check #1 */
+	if(*pos >= dev->size) {
+		goto out;
+	}
+
+	/* count adjustment */
+	if(*pos + count >= dev->size) {
+		count = dev->size - *pos; /* partial read */
+	}
+
+	BUG_ON(dev->data == NULL);
+
+	/* copy data to the user */
+	if(copy_to_user(buff, &(dev->data[*pos]), count)) {
+		/* something left to read i.e. fail */
+		ret = -EFAULT;
+		goto out;
+	}
+
+	/* advance marker */
+	*pos += count;
+	ret = count;
+
+	out:
+		mutex_unlock(&dev->mutex);
+		pr_info(LOG "reading /dev/poums%d, %zd\n", minor, ret);
+		return ret;
 }
-static ssize_t
-poums_write(struct file *fp, const char __user *buff, size_t count, loff_t *off) {
-	unsigned int minor = iminor(fp->f_inode);
 
-	pr_info(LOG "writing /dev/poums%d\n", minor);
-	return 4; /* 4 byte "lol\0" */
+static ssize_t
+poums_write(struct file *fp, const char __user *buff, size_t count, loff_t *pos) {
+	unsigned int minor = iminor(fp->f_inode);
+	struct poums_device *dev = fp->private_data;
+	ssize_t ret = -ENOMEM; /* default err */
+
+	/* lock thread */
+	if(mutex_lock_interruptible(&dev->mutex)) {
+		return -EINTR;
+	}
+
+	BUG_ON(dev->data == NULL);
+
+	if(*pos + count > BUFFSIZE) {
+		count = BUFFSIZE - *pos; /* write up to end */
+	}
+
+	if(copy_from_user(&(dev->data[*pos]), buff, count)) {
+		ret = -EFAULT;
+		goto out;
+	}
+
+	/* advance marker */
+	*pos += count;
+	ret = count;
+
+	/* update size */
+	if(dev->size < *pos) {
+		dev->size = *pos;
+	}
+
+	out:
+		mutex_unlock(&dev->mutex);
+		pr_info(LOG "writing /dev/poums%d: %zd\n", minor, ret);
+		return ret;
 }
 
 /* =============================================== */
@@ -207,6 +279,7 @@ init_poums_device(struct poums_device *dev, unsigned int minor) {
 	dev->data = NULL;
 	dev->size = 0;
 	cdev_init(&dev->cdev, &poums_fops);
+	mutex_init(&dev->mutex);
 	dev->cdev.owner = THIS_MODULE;
 
 	err = cdev_add(&dev->cdev, MKDEV(MAJOR(first), minor), 1/*count*/);

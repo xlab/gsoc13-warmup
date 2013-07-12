@@ -18,6 +18,8 @@
 #include <linux/device.h>
 #include <linux/mutex.h>
 
+#include <asm/uaccess.h>
+
 #define NUM_MAX 8 /* maximum number of devices */
 #define BUFFSIZE 4096 /* default buffer size to store char-data */
 #define BASENAME "poums" /* defines is a good thing xD */
@@ -27,8 +29,9 @@
 struct poums_device {
 	char *data; /* char buf */
 	ssize_t size; /* amount of data stored in buf */
-	struct cdev cdev;
 	dev_t devt; /* numbers for debug purposes */
+	struct mutex mutex; /* mutex lock */
+	struct cdev cdev;
 };
 
 /* helpers */
