@@ -24,8 +24,39 @@ poums_open(struct inode *inode, struct file *fp) {
 	struct poums_device *dev = NULL;
 
 	unsigned int minor = iminor(inode);
+	unsigned int major = imajor(inode);
+
+	if(major != MAJOR(first) || minor < 0 || minor >= num) {
+		pr_err(LOG "no such device for major=%d, minor=%d\n", major, minor);
+		return -ENODEV;
+	}
+
 	dev = &poums_devices[minor];
 	fp->private_data = dev;
+
+	if(inode->i_cdev != dev->cdev) {
+		pr_err(LOG "wrong device found, internal error\n");
+		return -ENODEV;
+	}
+
+	/* truncate if opened in write-only mode */
+	if((fp->f_flags & O_ACCMODE) == O_WRONLY) {
+		kfree(dev->data);
+		dev->size = 0;
+	}
+
+	if (dev->data == NULL ) {
+		/* allocate storage for the first time */
+		dev->data = (char *) kzalloc(BUFFSIZE, GFP_KERNEL);
+		if (dev->data == NULL) {
+			pr_err(
+					LOG "unable to allocate %d bytes for the storage (minor=%d)\n",
+					BUFFSIZE, minor);
+			return -ENOMEM;
+		} else {
+			dev->size = 0;
+		}
+	}
 
 	pr_info(LOG "opening /dev/poums%d\n", minor);
 	return 0;
@@ -99,8 +130,8 @@ static int __init task21_init(void) {
 		}
 	}
 
-	pr_info(LOG "initialized: %d/%d\n", init_num, num);
 	BUG_ON(init_num != num);/* should be all */
+	pr_info(LOG "initialized: %d/%d\n", init_num, num);
 
 	unsigned int created_num;
 	dev_t curr;
@@ -120,8 +151,8 @@ static int __init task21_init(void) {
 		}
 	}
 
-	pr_info(LOG "created: %d/%d\n", created_num, num);
 	BUG_ON(created_num != num); /* should be all */
+	pr_info(LOG "created: %d/%d\n", created_num, num);
 
 	pr_info(LOG "driver registered successfully\n");
 	return 0;
@@ -162,6 +193,7 @@ deinit_poums_devices(unsigned int num) {
 			cdev_del(&dev->cdev); /* deinit cdev */
 			kfree(dev->data); /* cleanup allocated storage */
 		}
+		kfree(poums_devices); /* cleanup devices array */
 	} else {
 		pr_warn(LOG "nothing to deinit. Wat?\n");
 	}

@@ -26,7 +26,7 @@
 /* device representation */
 struct poums_device {
 	char *data; /* char buf */
-	unsigned long size; /* amount of data stored in buf */
+	ssize_t size; /* amount of data stored in buf */
 	struct cdev cdev;
 	dev_t devt; /* numbers for debug purposes */
 };
