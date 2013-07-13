@@ -8,7 +8,7 @@ DEVICE = '/dev/poums0'
 
 if not File.exist? DEVICE
   puts "Device #{DEVICE} does not exist"
- # exit
+  exit
 end
 
 # truncate
