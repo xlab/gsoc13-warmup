@@ -57,5 +57,5 @@ poums_llseek(struct file *, loff_t, int);
 
 struct file_operations poums_fops = { .owner = THIS_MODULE, .open = poums_open,
 		.release = poums_close, .read = poums_read, .write = poums_write,
-		.llseek = no_llseek };
+		.llseek = poums_llseek };
 

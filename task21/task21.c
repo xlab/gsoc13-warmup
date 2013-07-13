@@ -8,9 +8,12 @@
 
 /* params */
 static unsigned int num = 1; /* number of devices to create */
+static unsigned long buffsize = BUFFSIZE;
 
 module_param(num, uint, S_IRUGO);
-MODULE_PARM_DESC(num, "number of devices to create (1-8)");
+module_param(buffsize, ulong, S_IRUGO);
+MODULE_PARM_DESC(num, "number of devices to create (1-8)(default: 1)");
+MODULE_PARM_DESC(buffsize, "size of device's buffer in bytes (default: 4096)");
 /* end params */
 
 static dev_t first; /* first device number for driver */
@@ -45,8 +48,9 @@ poums_open(struct inode *inode, struct file *fp) {
 		return -EINTR;
 	}
 
-	/* truncate if opened in write-only mode */
-	if((fp->f_flags & O_ACCMODE) == O_WRONLY) {
+	/* truncate if needed */
+	if(fp->f_flags & O_TRUNC) {
+		pr_info(LOG "truncating\n");
 		kfree(dev->data);
 		dev->data = NULL;
 		dev->size = 0;
@@ -54,11 +58,11 @@ poums_open(struct inode *inode, struct file *fp) {
 
 	if (dev->data == NULL ) {
 		/* allocate storage for the first time */
-		dev->data = (char *) kzalloc(BUFFSIZE, GFP_KERNEL);
+		dev->data = (char *) kzalloc(buffsize, GFP_KERNEL);
 		if (dev->data == NULL) {
 			pr_err(
-					LOG "unable to allocate %d bytes for the storage (minor=%d)\n",
-					BUFFSIZE, minor);
+					LOG "unable to allocate %zd bytes for the storage (minor=%d)\n",
+					buffsize, minor);
 			ret = -ENOMEM;
 		} else {
 			dev->size = 0;
@@ -130,8 +134,14 @@ poums_write(struct file *fp, const char __user *buff, size_t count, loff_t *pos)
 
 	BUG_ON(dev->data == NULL);
 
-	if(*pos + count > BUFFSIZE) {
-		count = BUFFSIZE - *pos; /* write up to end */
+	/* truncate if needed */
+	if(fp->f_flags & O_APPEND) {
+		pr_info(LOG "appending\n");
+		*pos = dev->size;
+	}
+
+	if(*pos + count > buffsize) {
+		count = buffsize - *pos; /* write up to end */
 	}
 
 	if(copy_from_user(&(dev->data[*pos]), buff, count)) {
@@ -154,16 +164,54 @@ poums_write(struct file *fp, const char __user *buff, size_t count, loff_t *pos)
 		return ret;
 }
 
+static loff_t
+poums_llseek(struct file *fp, loff_t off, int whence) {
+	unsigned int minor = iminor(fp->f_inode);
+	struct poums_device *dev = fp->private_data;
+	loff_t newpos = 0;
+
+	switch (whence) {
+	case SEEK_SET:
+		newpos = off;
+		break;
+	case SEEK_CUR:
+		newpos = fp->f_pos + off;
+		break;
+	case SEEK_END:
+		newpos = dev->size + off;
+		break;
+	default:
+		return -EINVAL;
+		break;
+	}
+
+	if (newpos < 0 || newpos > buffsize) {
+		return -EINVAL;
+	}
+
+	fp->f_pos = newpos;
+	pr_info(LOG "seek /dev/poums%d: %lld\n", minor, newpos);
+	return newpos;
+}
+
 /* =============================================== */
 
 static int __init task21_init(void) {
 	pr_info(LOG "device init\n");
 	int err = 0;
 
+	/* check parameters */
 	if(num < 1 || num > NUM_MAX) {
 		pr_err(LOG "invalid value of `num` argument: must be 1-%d\n", NUM_MAX);
 		return -EINVAL;
 	}
+
+	if(buffsize < 1 || buffsize > ULONG_MAX) {
+		pr_err(LOG "invalid value of `buffsize` argument: must be 1-%lu\n", ULONG_MAX);
+		return -EINVAL;
+	}
+
+	pr_info(LOG "buffsize: %lu\n", buffsize);
 
 	 /* allocate region for @num devices */
 	err = alloc_chrdev_region(&first/*where to put*/, 0/*baseminor*/,
