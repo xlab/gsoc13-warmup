@@ -2,6 +2,12 @@
 #include <fcntl.h>
 #include <string.h>
 
+/*
+ *  Task 2.1
+ *  Tests in C
+ *  I think Ruby is better
+ */
+
 #define DEVICE "/dev/poums0"
 
 int main() {
