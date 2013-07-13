@@ -167,7 +167,6 @@ poums_write(struct file *fp, const char __user *buff, size_t count, loff_t *pos)
 static loff_t
 poums_llseek(struct file *fp, loff_t off, int whence) {
 	unsigned int minor = iminor(fp->f_inode);
-	struct poums_device *dev = fp->private_data;
 	loff_t newpos = 0;
 
 	switch (whence) {
@@ -178,7 +177,7 @@ poums_llseek(struct file *fp, loff_t off, int whence) {
 		newpos = fp->f_pos + off;
 		break;
 	case SEEK_END:
-		newpos = dev->size + off;
+		newpos = buffsize + off;
 		break;
 	default:
 		return -EINVAL;
