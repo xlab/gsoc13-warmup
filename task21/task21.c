@@ -44,7 +44,7 @@ poums_open(struct inode *inode, struct file *fp) {
 	}
 
 	/* lock thread */
-	if(mutex_lock_interruptible(&dev->mutex)) {
+	if(mutex_lock_killable(&dev->mutex)) {
 		return -EINTR;
 	}
 
@@ -88,7 +88,7 @@ poums_read(struct file *fp, char __user *buff, size_t count, loff_t *pos) {
 	ssize_t ret = 0;
 
 	/* lock thread */
-	if(mutex_lock_interruptible(&dev->mutex)) {
+	if(mutex_lock_killable(&dev->mutex)) {
 		return -EINTR;
 	}
 
@@ -128,7 +128,7 @@ poums_write(struct file *fp, const char __user *buff, size_t count, loff_t *pos)
 	ssize_t ret = -ENOMEM; /* default err */
 
 	/* lock thread */
-	if(mutex_lock_interruptible(&dev->mutex)) {
+	if(mutex_lock_killable(&dev->mutex)) {
 		return -EINTR;
 	}
 
