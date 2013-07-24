@@ -38,11 +38,6 @@ poums_open(struct inode *inode, struct file *fp) {
 	dev = &poums_devices[minor];
 	fp->private_data = dev;
 
-	if(inode->i_cdev != &dev->cdev) {
-		pr_err(LOG "wrong device found, internal error\n");
-		return -ENODEV;
-	}
-
 	/* lock thread */
 	if(mutex_lock_killable(&dev->mutex)) {
 		return -EINTR;
@@ -83,7 +78,7 @@ poums_close(struct inode *inode, struct file *fp) {
 
 static ssize_t
 poums_read(struct file *fp, char __user *buff, size_t count, loff_t *pos) {
-	unsigned int minor = iminor(fp->f_inode);
+	unsigned int minor = iminor(fp->f_dentry->d_inode);
 	struct poums_device *dev = fp->private_data;
 	ssize_t ret = 0;
 
@@ -123,7 +118,7 @@ poums_read(struct file *fp, char __user *buff, size_t count, loff_t *pos) {
 
 static ssize_t
 poums_write(struct file *fp, const char __user *buff, size_t count, loff_t *pos) {
-	unsigned int minor = iminor(fp->f_inode);
+	unsigned int minor = iminor(fp->f_dentry->d_inode);
 	struct poums_device *dev = fp->private_data;
 	ssize_t ret = -ENOMEM; /* default err */
 
@@ -166,7 +161,7 @@ poums_write(struct file *fp, const char __user *buff, size_t count, loff_t *pos)
 
 static loff_t
 poums_llseek(struct file *fp, loff_t off, int whence) {
-	unsigned int minor = iminor(fp->f_inode);
+	unsigned int minor = iminor(fp->f_dentry->d_inode);
 	loff_t newpos = 0;
 
 	switch (whence) {
