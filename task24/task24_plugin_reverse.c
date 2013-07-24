@@ -15,21 +15,30 @@
 #include "task24.h"
 
 #define PLUGIN_NAME "increment_plugin"
-#define LOG "increment_plugin: "
+#define LOG "task24_increment_plugin: "
 
-static int handle(int *i, int arg) {
-	(*i) += arg;
+static int handle(const char *in, char *out, size_t out_size) {
 	return 0;
 }
+
 
 static int __init plugin_init(void) {
 	pr_info(LOG "%s init\n", PLUGIN_NAME);
 	int err = 0;
 	pr_info(LOG "trying to register in manager\n");
-	err = string_op_plugin_register(PLUGIN_NAME, &handle);
+
+	struct string_plugin plugin = {
+			.id = 12,
+			.name = PLUGIN_NAME,
+			.handler = &handle
+	};
+
+	err = string_op_plugin_register(&plugin);
+
 	if(err) {
 		pr_info(LOG "Error: %d\n", err);
 	}
+
 	return err;
 }
 
