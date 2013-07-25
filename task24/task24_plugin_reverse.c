@@ -11,27 +11,39 @@
 #include <linux/kernel.h>
 #include <linux/errno.h>
 #include <linux/err.h>
+#include <linux/delay.h>
 
 #include "task24.h"
 
-#define PLUGIN_NAME "increment_plugin"
-#define LOG "task24_increment_plugin: "
+#define PLUGIN_NAME "plugin_reverse"
+#define LOG "task24_plugin_reverse: "
 
 static int handle(const char *in, char *out, size_t out_size) {
+	int i = 0;
+	char c;
+
+	pr_info(LOG "handling string: %s\n", in);
+	msleep_interruptible(60000);
+
+	while(i < out_size && (c = in[i++]) != '\0') {
+		out[(out_size - 1) - i] = c;
+	}
+
 	return 0;
 }
 
+static struct string_plugin plugin = {
+		.owner = THIS_MODULE,
+		.id = 0x01,
+		.name = PLUGIN_NAME,
+		.handler = &handle
+};
 
 static int __init plugin_init(void) {
-	pr_info(LOG "%s init\n", PLUGIN_NAME);
 	int err = 0;
-	pr_info(LOG "trying to register in manager\n");
 
-	struct string_plugin plugin = {
-			.id = 12,
-			.name = PLUGIN_NAME,
-			.handler = &handle
-	};
+	pr_info(LOG "plugin init\n");
+	pr_info(LOG "trying to register in manager\n");
 
 	err = string_op_plugin_register(&plugin);
 
@@ -43,7 +55,8 @@ static int __init plugin_init(void) {
 }
 
 static void __exit plugin_exit(void) {
-	pr_info(LOG "%s exit\n", PLUGIN_NAME);
+	string_op_plugin_unregister(&plugin);
+	pr_info(LOG "plugin exit\n");
 }
 
 module_init(plugin_init);

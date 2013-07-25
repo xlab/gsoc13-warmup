@@ -4,17 +4,23 @@
  *      Author: Maxim Kouprianov
  */
 
+#include <linux/ioctl.h>
+#include <stddef.h>
+
+#define DEVNAME "poums.StringPlugin"
+
 struct string_plugin {
-	int id;
+	struct module *owner;
+	unsigned int id;
 	const char *name;
 	int (*handler)(const char *in, char *out, size_t out_size);
 };
 
 struct string_plugin_call_params {
-	int id;
-	char *string;
+	unsigned int id;
+	const char *string;
 	char *buffer;
-	int bufsize;
+	unsigned int bufsize;
 };
 
 extern int
@@ -22,4 +28,8 @@ string_op_plugin_register(struct string_plugin *plugin);
 
 extern int
 string_op_plugin_unregister(struct string_plugin *plugin);
+
+#define IOC_MAGIC ('h')
+#define IOCTL_HANDLE_STRING _IOWR(IOC_MAGIC, 0x01, \
+		struct string_plugin_call_params *)
 
