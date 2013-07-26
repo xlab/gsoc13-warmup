@@ -1,5 +1,5 @@
 /*
- * task24_plugin_reverse.c
+ * task24_plugin_tolower.c
  *
  *      Author: Maxim Kouprianov
  */
@@ -13,8 +13,8 @@
 
 #include "task24.h"
 
-#define PLUGIN_NAME "plugin_reverse"
-#define LOG "task24_plugin_reverse: "
+#define PLUGIN_NAME "plugin_tolower"
+#define LOG "task24_plugin_tolower: "
 
 static int handle(const char *in, char *out, size_t out_size) {
 	int limit, i = 0;
@@ -22,8 +22,13 @@ static int handle(const char *in, char *out, size_t out_size) {
 	pr_info(LOG "handling string: %s\n", in);
 	limit = strlen(in) < out_size - 1 ? strlen(in) : out_size - 1;
 	while(i < limit) {
-		out[i] = in[limit - (i + 1)];
-		++i;
+		char c = in[i];
+
+		if(c >= 'A' && c <= 'Z') {
+			out[i++] = c + 32;
+		} else {
+			out[i++] = c;
+		}
 
 		if(i == limit) {
 			out[i] = '\0';
@@ -35,7 +40,7 @@ static int handle(const char *in, char *out, size_t out_size) {
 
 static struct string_plugin plugin = {
 		.owner = THIS_MODULE,
-		.id = PLUGIN_REVERSE,
+		.id = PLUGIN_TOLOWER,
 		.name = PLUGIN_NAME,
 		.handler = &handle
 };

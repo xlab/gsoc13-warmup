@@ -9,6 +9,13 @@
 
 #define DEVNAME "poums.StringPlugin"
 
+/* plugins namespace */
+#define PLUGIN_REVERSE 0
+#define PLUGIN_TOLOWER 1
+#define PLUGIN_TOCAPS 2
+#define PLUGIN_SLOWPOKE 63
+
+
 struct string_plugin {
 	struct module *owner;
 	unsigned int id;

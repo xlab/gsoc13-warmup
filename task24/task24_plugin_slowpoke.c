@@ -1,5 +1,5 @@
 /*
- * task24_plugin_reverse.c
+ * task24_plugin_slowpoke.c
  *
  *      Author: Maxim Kouprianov
  */
@@ -10,32 +10,24 @@
 #include <linux/kernel.h>
 #include <linux/errno.h>
 #include <linux/err.h>
+#include <linux/delay.h>
 
 #include "task24.h"
 
-#define PLUGIN_NAME "plugin_reverse"
-#define LOG "task24_plugin_reverse: "
+#define PLUGIN_NAME "plugin_slowpoke"
+#define LOG "task24_plugin_slowpoke: "
 
 static int handle(const char *in, char *out, size_t out_size) {
-	int limit, i = 0;
-
 	pr_info(LOG "handling string: %s\n", in);
-	limit = strlen(in) < out_size - 1 ? strlen(in) : out_size - 1;
-	while(i < limit) {
-		out[i] = in[limit - (i + 1)];
-		++i;
-
-		if(i == limit) {
-			out[i] = '\0';
-		}
-	}
+	msleep_interruptible(30000);
+	snprintf(out, out_size, "slowpoke is sooo sloooow");
 
 	return 0;
 }
 
 static struct string_plugin plugin = {
 		.owner = THIS_MODULE,
-		.id = PLUGIN_REVERSE,
+		.id = PLUGIN_SLOWPOKE,
 		.name = PLUGIN_NAME,
 		.handler = &handle
 };

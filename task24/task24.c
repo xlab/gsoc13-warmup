@@ -25,7 +25,7 @@
 #include "task24.h"
 
 #define PLUGINS_MAX 64 /* maximum number of registered plugins */
-#define LOG "task24: "
+#define LOG "task24_manager: "
 
 static dev_t first; /* first device number for driver */
 static struct class *poums_class = NULL;/* ptr to device's class object */
@@ -76,7 +76,7 @@ exec_plugin(struct string_plugin_call_params *params) {
 		return -EINVAL;
 	}
 
-	pr_info(LOG "manager locked %s (id: %d)\n", active->name, id);
+	pr_info(LOG "locked %s (id: %d)\n", active->name, id);
 
 	if(params->string == NULL) {
 		pr_err(LOG "no suitable input string provided (NULL)"
@@ -104,7 +104,7 @@ exec_plugin(struct string_plugin_call_params *params) {
 
 	out: /* operations complete, unlock plugin */
 		module_put(plugins[id]->owner);
-		pr_info(LOG "manager unlocked %s (id: %d)\n", active->name, id);
+		pr_info(LOG "unlocked %s (id: %d)\n", active->name, id);
 		return err;
 }
 
@@ -155,7 +155,6 @@ string_op_plugin_register(struct string_plugin *plugin) {
 extern int
 string_op_plugin_unregister(struct string_plugin *plugin) {
 	int id;
-	char *name;
 	struct string_plugin *pref;
 
 	if (check_plugin(plugin) > 0) {
@@ -173,7 +172,7 @@ string_op_plugin_unregister(struct string_plugin *plugin) {
 	if (pref->handler != plugin->handler) {
 		pr_err(
 				LOG "plugin tried to unregister foreign instance of %s (id: %d)\n",
-				name, id);
+				plugin->name, id);
 		return -EINVAL;
 	}
 
