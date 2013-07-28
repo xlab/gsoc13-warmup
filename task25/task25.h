@@ -4,5 +4,7 @@
  *      Author: Maxim Kouprianov
  */
 
-#define FILENAME "poums.Compressor"
+#define COMPRESSOR_DIR "task25"
+#define COMPRESSOR_FILE "compressor"
+
 
