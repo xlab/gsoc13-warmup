@@ -28,7 +28,7 @@
 /* =============================================== */
 #include "task25.h"
 
-#define BUFSIZE 64 /* bufsize, KB */
+#define BUFSIZE (64 * 1024) /* bufsize */
 #define LOG "task25: "
 
 struct dentry *file;
@@ -64,6 +64,7 @@ struct file_operations compressor_fops = {
 
 /* =============================================== */
 static int __init task25_init(void) {
+	int err = 0;
     mutex_init(&mutex);
     init_waitqueue_head(&inq);
     init_waitqueue_head(&outq);
@@ -77,10 +78,12 @@ static int __init task25_init(void) {
     dir = debugfs_create_dir(COMPRESSOR_DIR, NULL);
     if(dir == NULL) {
         pr_err(LOG "unable to create compressor's dir in debugfs\n");
-        return -ENODEV;
+        err = -ENODEV;
+        goto out;
     } else if(dir < 0) {
         pr_err(LOG "there is no support for debugfs in kernel\n");
-        return -ENODEV;
+        err = -ENODEV;
+        goto out;
     }
 
     file = debugfs_create_file(COMPRESSOR_FILE, 0644,
@@ -89,11 +92,27 @@ static int __init task25_init(void) {
     if(file == NULL || file < 0) {
         pr_err(LOG "unable to create compressor's file in debugfs\n");
         debugfs_remove(dir);
-        return -ENODEV;
+        err = -ENODEV;
+        goto out;
     }
+
+	buffer = kzalloc(BUFSIZE, GFP_KERNEL);
+	if (!buffer) {
+		pr_err("no memory for buffer\n");
+	    debugfs_remove_recursive(dir);
+        err = -ENOMEM;
+        goto out;
+	}
+
+	rp = wp = buffer;
+    end = buffer + BUFSIZE;
 
     pr_info(LOG "compressor started\n");
     return 0;
+
+    out:
+    	kfree(lzo_wrkmem);
+    	return err;
 }
 
 static void __exit task25_exit(void) {
@@ -107,44 +126,11 @@ static void __exit task25_exit(void) {
 
 static int
 compressor_open(struct inode* inode, struct file* filp) {
-    if (mutex_lock_interruptible(&mutex)) {
-        return -ERESTARTSYS;
-    }
-
-    if (!buffer) {
-        buffer = kmalloc(BUFSIZE, GFP_KERNEL);
-        if (!buffer) {
-            mutex_unlock(&mutex);
-            pr_err("no memory for buffer\n");
-            return -ENOMEM;
-        }
-
-        rp = wp = buffer;
-    }
-
-    end = buffer + BUFSIZE;
-
-    if (filp->f_mode & FMODE_READ) {
-        nreaders++;
-    }
-    if (filp->f_mode & FMODE_WRITE) {
-        nwriters++;
-    }
-    mutex_unlock(&mutex);
-
     return nonseekable_open(inode, filp);
 }
 
 static int
 compressor_release(struct inode* inode, struct file* filp) {
-    mutex_lock(&mutex);
-    if (filp->f_mode & FMODE_READ) {
-        nreaders--;
-    }
-    if (filp->f_mode & FMODE_WRITE) {
-        nwriters--;
-    }
-    mutex_unlock(&mutex);
     return 0;
 }
 
@@ -156,12 +142,13 @@ compressor_read(struct file *fp, char __user *buf, size_t count,
     }
 
     while(rp == wp) { /* no data */
-    	pr_info(LOG "no data on read\n");
         mutex_unlock(&mutex);
         if(fp->f_flags & O_NONBLOCK) {
             return -EAGAIN;
         }
-        pr_info(LOG "waiting for data (blocking)\n");
+
+        /* waiting for data & block */
+
         if(wait_event_interruptible(inq, rp != wp)) {
             return -ERESTARTSYS;
         }
@@ -170,14 +157,14 @@ compressor_read(struct file *fp, char __user *buf, size_t count,
         }
     }
 
-    pr_info(LOG "data arrived\n");
+    /* data arrived */
     if(wp > rp) {
         count = min(count, (size_t)(wp - rp));
     } else {
         count = min(count, (size_t)(end - rp));
     }
 
-    if(copy_to_user(buf, rp, count)) {
+    if(copy_to_user(__user buf, rp, count)) {
         mutex_unlock(&mutex);
         return -EFAULT;
     }
@@ -186,8 +173,6 @@ compressor_read(struct file *fp, char __user *buf, size_t count,
     if(rp == end) {
         rp = buffer;
     }
-
-    pr_info(LOG "copied to user %d bytes, wp-rp=%d\n", count, wp-rp);
 
     mutex_unlock(&mutex);
     wake_up_interruptible(&outq);
@@ -198,6 +183,7 @@ static int freespace(void) {
     if (rp == wp) {
         return BUFSIZE - 1;
     }
+
     return ((rp + BUFSIZE - wp) % BUFSIZE) - 1;
 }
 
@@ -247,10 +233,6 @@ static ssize_t
 compressor_write(struct file *fp, const char __user *buf, size_t count,
         loff_t *pos) {
     int result;
-    char *lzobuf;
-    size_t compressed;
-    int err;
-
 
     if (mutex_lock_interruptible(&mutex))
         return -ERESTARTSYS;
@@ -264,39 +246,22 @@ compressor_write(struct file *fp, const char __user *buf, size_t count,
     count = min(count, (size_t)freespace());
     if (wp >= rp) {
         count = min(count, (size_t)(end - wp));
-    }
-    else {
+    } else {
         count = min(count, (size_t)(rp - wp - 1));
     }
 
-    lzobuf = (char *)kzalloc(count, GFP_KERNEL);
-    if(lzobuf == NULL) {
-    	pr_err(LOG "no memory for temporary lz buffer (size=%d)\n", count);
-    	mutex_unlock (&mutex);
-    	return -ENOMEM;
-    }
-
-    if (copy_from_user(lzobuf, buf, count)) {
-    	kzfree(lzobuf);
+    if (copy_from_user(wp, __user buf, count)) {
         mutex_unlock (&mutex);
         return -EFAULT;
     }
 
-    err = lzo1x_1_compress(lzobuf, count, wp, &compressed, lzo_wrkmem);
-    kzfree(lzobuf);
-
-    if(err < 0) {
-    	pr_err(LOG "error compressing input: %d\n", err);
-        mutex_unlock (&mutex);
-        return -EFAULT;
-    }
-
-    wp += compressed;
+    wp += count;
     if (wp == end) {
         wp = buffer;
+    } else if(wp > end) {
+    	pr_info(LOG "wp > end!!!\n");
     }
 
-    pr_info(LOG "copied from user %d bytes, compressed to %d, wp-rp=%d\n", count, compressed, wp-rp);
     mutex_unlock(&mutex);
     wake_up_interruptible(&inq);
     return count;
