@@ -30,6 +30,10 @@
 
 #define BUFSIZE (64 * 1024) /* bufsize */
 #define LOG "task25: "
+#define LZO_MINIMUM_CHUNK (4 * 1024) /* 4 KB */
+
+#define lzo1x_worst_backwards(y) \
+	((16 * ((y) - 64 - 3) / 17) - 4 - 4) /* with space for header */
 
 struct dentry *file;
 struct dentry *dir;
@@ -55,12 +59,23 @@ static unsigned int
 compressor_poll(struct file *filp, poll_table *wait);
 
 struct file_operations compressor_fops = {
+	.owner = THIS_MODULE,
     .open = compressor_open,
     .release = compressor_release,
     .read = compressor_read,
     .write = compressor_write,
     .poll = compressor_poll
 };
+
+static void write32(char *out, unsigned int n)
+{
+    unsigned char b[4];
+    b[3] = (unsigned char) ((n >>  0) & 0xff);
+    b[2] = (unsigned char) ((n >>  8) & 0xff);
+    b[1] = (unsigned char) ((n >> 16) & 0xff);
+    b[0] = (unsigned char) ((n >> 24) & 0xff);
+    memcpy(out, b, 4);
+}
 
 /* =============================================== */
 static int __init task25_init(void) {
@@ -137,6 +152,8 @@ compressor_release(struct inode* inode, struct file* filp) {
 static ssize_t
 compressor_read(struct file *fp, char __user *buf, size_t count,
         loff_t *pos) {
+	int err = 0;
+
     if (mutex_lock_interruptible(&mutex)) {
         return -ERESTARTSYS;
     }
@@ -164,8 +181,10 @@ compressor_read(struct file *fp, char __user *buf, size_t count,
         count = min(count, (size_t)(end - rp));
     }
 
-    if(copy_to_user(__user buf, rp, count)) {
+    err = copy_to_user(__user buf, rp, count);
+    if(err) {
         mutex_unlock(&mutex);
+        pr_err(LOG "unable to write to user, error: %d\n", err);
         return -EFAULT;
     }
 
@@ -180,8 +199,12 @@ compressor_read(struct file *fp, char __user *buf, size_t count,
 }
 
 static int freespace(void) {
-    if (rp == wp) {
+    if (wp == rp) {
+    	/* reset heads */
+    	wp = rp = buffer;
         return BUFSIZE - 1;
+    } else if (wp > rp) {
+    	return end - wp;
     }
 
     return ((rp + BUFSIZE - wp) % BUFSIZE) - 1;
@@ -189,7 +212,7 @@ static int freespace(void) {
 
 static int waitspace(struct file *fp)
 {
-    while (freespace() == 0) { /* full */
+    while (freespace() < LZO_MINIMUM_CHUNK) { /* no enough room */
         DEFINE_WAIT(wait);
 
         mutex_unlock(&mutex);
@@ -198,7 +221,7 @@ static int waitspace(struct file *fp)
         }
 
         prepare_to_wait(&outq, &wait, TASK_INTERRUPTIBLE);
-        if (freespace() == 0) {
+        if (freespace() < LZO_MINIMUM_CHUNK) {
             schedule();
         }
         finish_wait(&outq, &wait);
@@ -220,10 +243,12 @@ static unsigned int compressor_poll(struct file *filp, poll_table *wait)
     poll_wait(filp, &inq,  wait);
     poll_wait(filp, &outq, wait);
     if (rp != wp) {
-        mask |= POLLIN | POLLRDNORM;    /* something to read */
+    	/* something to read */
+        mask |= POLLIN | POLLRDNORM;
     }
-    if (freespace()) {
-        mask |= POLLOUT | POLLWRNORM;   /* has space to write */
+    if (freespace() >= LZO_MINIMUM_CHUNK) {
+    	/* has space to write */
+        mask |= POLLOUT | POLLWRNORM;
     }
     mutex_unlock(&mutex);
     return mask;
@@ -233,9 +258,14 @@ static ssize_t
 compressor_write(struct file *fp, const char __user *buf, size_t count,
         loff_t *pos) {
     int result;
+    char *lzo_in = NULL;
+    size_t max_worst, end_wp, rp_wp_1 = 0;
+    size_t compressed = 0;
+    int err = 0;
 
-    if (mutex_lock_interruptible(&mutex))
+    if (mutex_lock_interruptible(&mutex)) {
         return -ERESTARTSYS;
+    }
 
     result = waitspace(fp);
     if (result) {
@@ -243,24 +273,49 @@ compressor_write(struct file *fp, const char __user *buf, size_t count,
         return result;
     }
 
-    count = min(count, (size_t)freespace());
+    max_worst = lzo1x_worst_backwards(freespace());
+    end_wp = lzo1x_worst_backwards(end - wp);
+    rp_wp_1 = lzo1x_worst_backwards(rp - wp - 1);
+
+    count = min(count, (size_t)max_worst);
     if (wp >= rp) {
-        count = min(count, (size_t)(end - wp));
+        count = min(count, (size_t)end_wp);
     } else {
-        count = min(count, (size_t)(rp - wp - 1));
+        count = min(count, (size_t)rp_wp_1);
     }
 
-    if (copy_from_user(wp, __user buf, count)) {
+    lzo_in = (char *)kzalloc(count, GFP_KERNEL);
+    if(lzo_in == NULL) {
         mutex_unlock (&mutex);
+        return -ENOMEM;
+    }
+
+    err = copy_from_user(lzo_in, __user buf, count);
+    if (err) {
+    	kfree(lzo_in);
+        mutex_unlock (&mutex);
+        pr_err(LOG "unable to copy from user, error: %d\n", err);
         return -EFAULT;
     }
 
-    wp += count;
-    if (wp == end) {
-        wp = buffer;
-    } else if(wp > end) {
-    	pr_info(LOG "wp > end!!!\n");
+    err = lzo1x_1_compress(lzo_in, count, wp + 8, &compressed, lzo_wrkmem);
+    kfree(lzo_in);
+
+    if(err != LZO_E_OK) {
+    	mutex_unlock (&mutex);
+    	pr_err(LOG "compression failed\n");
+    	return -EFAULT;
     }
+
+    write32(wp, count); /* write uncompressed size */
+    write32(wp + 4, compressed); /* write compressed size */
+    wp += 4 + 4 + compressed; /* header + compressed data */
+    if (wp > end) { /* circular buffer */
+        wp = buffer;
+    }
+
+    // pr_info(LOG "Got %d bytes from user, compressed to %d, wp-rp=%d\n", count, compressed, wp-rp);
+    // pr_info(LOG "free bytes: %d\n", freespace());
 
     mutex_unlock(&mutex);
     wake_up_interruptible(&inq);

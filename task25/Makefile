@@ -7,10 +7,10 @@ else
 KERNELDIR ?= /lib/modules/$(shell uname -r)/build
 PWD := $(shell pwd)
 
-all:# test
+all: test
 	$(MAKE) -C $(KERNELDIR) M=$(PWD) modules
 
-#test:
-#	gcc test_task21.c -o test_task21
+test:
+	gcc decompress_lzo.c -o decompress_lzo -llzo2
 
 endif
